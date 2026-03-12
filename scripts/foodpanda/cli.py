@@ -160,7 +160,15 @@ def address(postal_code):
                 console.print("[blue]正在获取账号保存的地址...[/]")
                 try:
                     result = api.get_saved_addresses()
-                    addr_list = result.get("items", []) if isinstance(result, dict) else result if isinstance(result, list) else []
+                    # API 可能返回 list 或 dict（含 items/addresses/data key）
+                    if isinstance(result, list):
+                        addr_list = result
+                    elif isinstance(result, dict):
+                        addr_list = result.get("items") or result.get("addresses") or result.get("data", [])
+                        if not isinstance(addr_list, list):
+                            addr_list = []
+                    else:
+                        addr_list = []
                     if addr_list:
                         for i, addr in enumerate(addr_list, 1):
                             label = addr.get("label") or addr.get("delivery_instructions") or ""
@@ -182,8 +190,10 @@ def address(postal_code):
                                 save_config(config)
                                 console.print(f"[green]✓ 地址已设置: {config['address']}[/]")
                                 return
-                except APIError:
-                    pass
+                    else:
+                        console.print("[dim]账号无保存地址[/]")
+                except APIError as e:
+                    console.print(f"[yellow]⚠ {e}[/]")
 
             postal_code = console.input("[green]请输入邮编> [/]").strip()
             if not postal_code:
@@ -201,6 +211,8 @@ def address(postal_code):
         })
         save_config(config)
         console.print(f"[green]✓ 地址已设置: {result['address']}[/]")
+    except EOFError:
+        console.print("\n[yellow]非交互终端，请直接传入邮编: fd address <postal_code>[/]")
     except (APIError, ValueError, IndexError) as e:
         console.print(f"[red]✗ {e}[/]")
     finally:
