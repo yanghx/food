@@ -144,31 +144,88 @@ def cli():
 
 @cli.command()
 @click.argument("postal_code", required=False)
-def address(postal_code):
-    """设置配送地址  无参数=从账号选择, 有参数=按邮编设置"""
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON (供 AI 解析)")
+@click.option("--pick", type=int, default=0, help="直接选择第 N 个已保存地址 (配合 --json)")
+def address(postal_code, as_json, pick):
+    """设置配送地址  无参数=从账号选择, 有参数=按邮编设置
+
+    \b
+    fd address                # 交互式选择
+    fd address 123456         # 按邮编设置
+    fd address --json         # JSON 列出已保存地址 + 当前地址
+    fd address --json --pick 1  # 选择第 1 个已保存地址
+    fd address 123456 --json  # 按邮编设置并输出 JSON
+    """
     api = _get_api()
     config = load_config()
 
     try:
-        # No postal code provided - show saved addresses from account
+        # --json --pick N: select saved address by index without interaction
+        if as_json and pick > 0 and not postal_code:
+            addr_list = _fetch_saved_addresses(api)
+            idx = pick - 1
+            if not (0 <= idx < len(addr_list)):
+                console.print(_json.dumps({"error": f"无效编号 {pick}, 共 {len(addr_list)} 个地址"}, ensure_ascii=False))
+                return
+            a = addr_list[idx]
+            config.update({
+                "latitude": float(a.get("latitude", 0)),
+                "longitude": float(a.get("longitude", 0)),
+                "address": a.get("formatted_customer_address") or a.get("address_line1", ""),
+                "postal_code": str(a.get("postcode", "")),
+            })
+            save_config(config)
+            console.print(_json.dumps({
+                "status": "ok",
+                "address": config["address"],
+                "postal_code": config["postal_code"],
+                "latitude": config["latitude"],
+                "longitude": config["longitude"],
+            }, ensure_ascii=False, indent=2))
+            return
+
+        # No postal code provided
         if not postal_code:
             current = config.get("address", "")
+
+            if as_json:
+                # JSON mode: list saved addresses + current, no interaction
+                result = {"current": None, "saved_addresses": []}
+                if current:
+                    result["current"] = {
+                        "address": current,
+                        "postal_code": config.get("postal_code", ""),
+                        "latitude": config.get("latitude", 0),
+                        "longitude": config.get("longitude", 0),
+                    }
+                if config.get("token"):
+                    try:
+                        addr_list = _fetch_saved_addresses(api)
+                        result["saved_addresses"] = [
+                            {
+                                "index": i,
+                                "address": a.get("formatted_customer_address") or a.get("address_line1", ""),
+                                "label": a.get("label") or a.get("delivery_instructions") or "",
+                                "postal_code": str(a.get("postcode", "")),
+                                "latitude": float(a.get("latitude", 0)),
+                                "longitude": float(a.get("longitude", 0)),
+                                "id": a.get("id", ""),
+                            }
+                            for i, a in enumerate(addr_list, 1)
+                        ]
+                    except APIError as e:
+                        result["error"] = str(e)
+                console.print(_json.dumps(result, ensure_ascii=False, indent=2))
+                return
+
+            # Interactive mode
             if current:
                 console.print(f"[dim]当前地址: {current}[/]\n")
 
             if config.get("token"):
                 console.print("[blue]正在获取账号保存的地址...[/]")
                 try:
-                    result = api.get_saved_addresses()
-                    # API 可能返回 list 或 dict（含 items/addresses/data key）
-                    if isinstance(result, list):
-                        addr_list = result
-                    elif isinstance(result, dict):
-                        addr_list = result.get("items") or result.get("addresses") or result.get("data", [])
-                        if not isinstance(addr_list, list):
-                            addr_list = []
-                    else:
-                        addr_list = []
+                    addr_list = _fetch_saved_addresses(api)
                     if addr_list:
                         for i, addr in enumerate(addr_list, 1):
                             label = addr.get("label") or addr.get("delivery_instructions") or ""
@@ -201,7 +258,10 @@ def address(postal_code):
 
         result = api.resolve_postal_code(postal_code)
         if not result:
-            console.print("[red]未找到该邮编[/]")
+            if as_json:
+                console.print(_json.dumps({"error": f"未找到邮编: {postal_code}"}, ensure_ascii=False))
+            else:
+                console.print("[red]未找到该邮编[/]")
             return
         config.update({
             "latitude": result["latitude"],
@@ -210,13 +270,39 @@ def address(postal_code):
             "postal_code": postal_code,
         })
         save_config(config)
-        console.print(f"[green]✓ 地址已设置: {result['address']}[/]")
+        if as_json:
+            console.print(_json.dumps({
+                "status": "ok",
+                "address": result["address"],
+                "postal_code": postal_code,
+                "latitude": result["latitude"],
+                "longitude": result["longitude"],
+            }, ensure_ascii=False, indent=2))
+        else:
+            console.print(f"[green]✓ 地址已设置: {result['address']}[/]")
     except EOFError:
-        console.print("\n[yellow]非交互终端，请直接传入邮编: fd address <postal_code>[/]")
+        if as_json:
+            console.print(_json.dumps({"error": "非交互终端，请传入邮编: fd address <postal_code> --json"}, ensure_ascii=False))
+        else:
+            console.print("\n[yellow]非交互终端，请直接传入邮编: fd address <postal_code>[/]")
     except (APIError, ValueError, IndexError) as e:
-        console.print(f"[red]✗ {e}[/]")
+        if as_json:
+            console.print(_json.dumps({"error": str(e)}, ensure_ascii=False))
+        else:
+            console.print(f"[red]✗ {e}[/]")
     finally:
         api.close()
+
+
+def _fetch_saved_addresses(api: FoodpandaAPI) -> list[dict]:
+    """Fetch saved addresses from API, normalizing the response format."""
+    result = api.get_saved_addresses()
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        addr_list = result.get("items") or result.get("addresses") or result.get("data", [])
+        return addr_list if isinstance(addr_list, list) else []
+    return []
 
 
 @cli.command()

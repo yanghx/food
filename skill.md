@@ -230,9 +230,37 @@ Set or view login token.
 
 Auto-refresh token from Chrome cookies via Playwright.
 
-### fd address [postal_code]
+### fd address [postal_code] [--json] [--pick N]
 
-Set delivery address. No args = pick from saved account addresses interactively.
+Set delivery address.
+
+```bash
+fd address --json                 # list current + saved addresses (no interaction)
+fd address --json --pick 1        # select saved address #1
+fd address 123456 --json          # set by postal code
+fd address                        # interactive mode
+```
+
+Response (no args):
+```json
+{
+  "current": {"address": "...", "postal_code": "123456", "latitude": 1.3, "longitude": 103.8},
+  "saved_addresses": [
+    {"index": 1, "address": "123 Main St", "label": "Home", "postal_code": "123456", "latitude": 1.3, "longitude": 103.8, "id": "abc"}
+  ]
+}
+```
+
+Response (with postal_code or --pick):
+```json
+{
+  "status": "ok",
+  "address": "123 Main St",
+  "postal_code": "123456",
+  "latitude": 1.3,
+  "longitude": 103.8
+}
+```
 
 ## Error Handling
 
