@@ -15,5 +15,8 @@ build/
 # OS
 .DS_Store
 
+# Skill venv
+scripts/.venv/
+
 # Sensitive / debug
 *.json

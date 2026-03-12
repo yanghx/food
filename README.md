@@ -1,116 +1,103 @@
-# fd — Foodpanda Singapore CLI
+# foodpanda — Claude Code Skill
 
-A command-line tool for ordering food on [Foodpanda Singapore](https://www.foodpanda.sg). Designed for both human and AI agent usage.
+A Claude Code skill for ordering food on [Foodpanda Singapore](https://www.foodpanda.sg). Install this skill, then use `/foodpanda` or let the agent automatically handle food ordering requests.
 
 ## Install
 
-```bash
-# Clone & install
-git clone <repo-url> && cd food
-pip install -e .
+Copy (or symlink) this repo into your Claude Code skills directory:
 
-# Install Playwright browser (for token refresh)
-playwright install chromium
+```bash
+# Option 1: Clone directly
+git clone <repo-url> ~/.claude/skills/foodpanda
+
+# Option 2: Symlink an existing checkout
+ln -s /path/to/this/repo ~/.claude/skills/foodpanda
 ```
 
-Dependencies: `rich`, `httpx`, `click`, `playwright`, `browser-cookie3`
-
-## Quick Start
+Then install the CLI:
 
 ```bash
-# 1. Set your token (from browser cookies — see "Authentication" below)
+bash ~/.claude/skills/foodpanda/scripts/install.sh
+```
+
+This creates a virtualenv in `scripts/.venv`, installs dependencies (`rich`, `httpx`, `click`, `playwright`, `browser-cookie3`), and places the `fd` command at `~/.local/bin/fd`.
+
+Make sure `~/.local/bin` is in your `PATH`.
+
+## Setup
+
+```bash
+# Set your Foodpanda token (from browser cookies)
 fd token eyJhbG...
 
-# 2. Set delivery address
-fd address 123456        # by postal code
-fd address               # or pick from saved addresses
+# Or auto-refresh from Chrome
+fd refresh
 
-# 3. Search & order
-fd search 'chicken rice'
-fd menu g9xw             # view menu by restaurant code
-fd add g9xw:3 -n 2       # add item #3, qty 2
-fd cart                   # review cart
-fd checkout               # place order (pandapay)
+# Set delivery address
+fd address 123456
+```
+
+## Usage
+
+Invoke the skill in Claude Code:
+
+```
+/foodpanda 帮我搜一下附近的鸡饭
+/foodpanda search sushi
+/foodpanda reorder last meal
+```
+
+Or just ask naturally — the agent will auto-invoke when you talk about ordering food.
+
+### Example Conversation
+
+```
+You: 帮我点一份海南鸡饭
+Agent: [searches restaurants, shows options]
+Agent: [shows menu, asks what to add]
+Agent: [adds to cart, shows dry-run total]
+Agent: 总计 $14.29 (含配送费 $2.99)，确认下单吗？
+You: 好
+Agent: [places order] ✓ 订单号: a1b2-c3d4
+```
+
+## Project Structure
+
+```
+foodpanda/                          # ← this is the skill root
+├── SKILL.md                        # Skill definition (frontmatter + agent instructions)
+├── README.md                       # This file
+├── scripts/
+│   ├── install.sh                  # One-command installer
+│   ├── setup.py                    # Python package setup
+│   ├── requirements.txt
+│   └── foodpanda/                  # Python package
+│       ├── __init__.py
+│       ├── cli.py                  # Click commands & Rich UI
+│       ├── api.py                  # FoodpandaAPI (all HTTP calls)
+│       ├── models.py               # Restaurant, MenuItem dataclasses
+│       ├── cart_store.py            # Persistent cart (JSON)
+│       └── config.py               # Config & token refresh
 ```
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `fd address [postal]` | Set delivery address. No args = pick from saved addresses |
+| `fd address [postal]` | Set delivery address |
 | `fd token [value]` | Set or view login token |
-| `fd refresh` | Auto-refresh token from Chrome cookies via Playwright |
-| `fd search <name>` | Search restaurants by name |
-| `fd search-food <name>` | Search for specific dishes across restaurants |
-| `fd menu <code>` | View a restaurant's full menu |
-| `fd add <code>:<#> [-n qty]` | Add menu item to cart (e.g. `fd add g9xw:3 -n 2`) |
-| `fd cart` | View current cart |
+| `fd refresh` | Auto-refresh token from Chrome cookies |
+| `fd search <name>` | Search restaurants |
+| `fd search-food <name>` | Search dishes across restaurants |
+| `fd menu <code>` | View restaurant menu |
+| `fd add <code>:<#> [-n qty]` | Add item to cart |
+| `fd cart` | View cart |
 | `fd clear` | Clear cart |
 | `fd checkout` | Place order |
 | `fd orders` | View order history |
 | `fd reorder [#]` | Re-order from history |
 
-### Checkout Options
-
-```bash
-fd checkout                          # immediate, pandapay
-fd checkout --dry-run                # calculate price only
-fd checkout --time 13:00             # scheduled delivery
-fd checkout --time 'tomorrow 18:30'  # tomorrow
-fd checkout --voucher SAVE5          # apply voucher
-fd checkout --note 'leave at door'   # delivery note
-fd checkout --json                   # JSON output (for AI)
-```
-
-## Authentication
-
-`fd` needs a Foodpanda bearer token to place orders and view history. Public endpoints (search, menu) work without a token.
-
-**Option A — Manual:** Copy the `token` cookie from your browser's DevTools on foodpanda.sg:
-
-```bash
-fd token eyJhbGciOiJSUz...
-```
-
-**Option B — Auto-refresh:** If you're logged into Foodpanda in Chrome, `fd` can read and refresh your token automatically:
-
-```bash
-fd refresh
-```
-
-This uses `browser-cookie3` to read Chrome cookies and `Playwright` to perform a headless visit that refreshes the token. On every `fd` command, the token is also auto-read from Chrome if available.
-
-## JSON Mode
-
-Most commands support `--json` for machine-readable output, making `fd` easy to integrate with AI agents:
-
-```bash
-fd search 'sushi' --json
-fd menu g9xw --json
-fd cart --json
-fd checkout --json --dry-run
-```
-
-## How It Works
-
-1. **Address resolution** — Singapore postal codes are resolved via the [OneMap API](https://www.onemap.gov.sg)
-2. **Restaurant search** — Uses the Delivery Hero Disco listing API
-3. **Menu & vendor details** — Fetched from `sg.fd-api.com` (public, no auth)
-4. **Checkout flow** — `cart/calculate` → `purchase/intent` → `cart/checkout` (requires auth)
-5. **Cart persistence** — Stored locally at `~/.foodpanda-cli/cart.json`
-6. **Config** — Stored at `~/.foodpanda-cli/config.json`
-
-## Project Structure
-
-```
-foodpanda/
-  cli.py         # Click commands & UI (Rich tables)
-  api.py         # FoodpandaAPI — all HTTP calls
-  models.py      # Restaurant, MenuItem, Cart dataclasses
-  cart_store.py   # Persistent cart (JSON file)
-  config.py      # Config management & token refresh
-setup.py         # Package setup, entry point: fd
-```
+Most commands support `--json` for machine-readable output.
 
 ## Requirements
 

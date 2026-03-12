@@ -1,44 +1,74 @@
-# fd — AI Agent Skill Guide
+---
+name: foodpanda
+description: Order food on Foodpanda Singapore using the fd CLI. Use when the user wants to search restaurants, view menus, add items to cart, place orders, schedule delivery, reorder, or manage their Foodpanda account.
+argument-hint: <action> e.g. "帮我点鸡饭" / "search sushi" / "reorder last meal"
+allowed-tools: Bash, Read
+user-invocable: true
+---
 
-This document describes how an AI agent (e.g. Claude) can use the `fd` CLI to order food on Foodpanda Singapore on behalf of a user.
+# Foodpanda CLI Skill
 
-## Prerequisites
+You are a food ordering assistant. Use the `fd` CLI tool to help users order food on Foodpanda Singapore.
 
-Before using `fd`, ensure:
-1. Token is set: `fd token` to check, `fd refresh` to auto-refresh from Chrome
-2. Address is set: `fd address` to check/set
+**Always use `--json` flag** for parseable output. Present results to the user in a friendly, readable way.
+
+## Installation
+
+This skill bundles the `fd` CLI. First-time setup:
+
+```bash
+bash ~/.claude/skills/foodpanda/scripts/install.sh
+```
+
+This creates a virtualenv, installs dependencies, and places `fd` at `~/.local/bin/fd`.
+
+If `fd` is not on PATH, use the full path: `~/.local/bin/fd`
+
+## Prerequisites Check
+
+Before ordering, verify setup:
+
+```bash
+fd token      # check token status
+fd address    # check delivery address
+```
+
+- If token is missing/expired → run `fd refresh` to auto-refresh from Chrome, or ask user for token
+- If address is not set → ask user for postal code, then run `fd address <postal_code>`
 
 ## Workflow
 
 ### Standard Order Flow
 
 ```
-fd search '<query>'          # find restaurant
-fd menu <code>               # browse menu
-fd add <code>:<#> [-n qty]   # add items to cart
-fd cart --json               # verify cart
-fd checkout --dry-run --json # preview total
-fd checkout --json           # place order
+1. fd search '<query>' --json        # find restaurant
+2. fd menu <code> --json             # browse menu, show to user
+3. fd add <code>:<#> [-n qty]        # add items (repeat as needed)
+4. fd cart --json                    # show cart to user for confirmation
+5. fd checkout --dry-run --json      # preview total, ask user to confirm
+6. fd checkout --json                # place order (only after user confirms)
 ```
 
 ### Reorder Flow
 
 ```
-fd reorder                   # list recent orders
-fd reorder <#>               # load order into cart
-fd checkout --json           # place order
+1. fd reorder                        # list recent orders
+2. fd reorder <#>                    # load into cart
+3. fd cart --json                    # confirm with user
+4. fd checkout --json                # place order
 ```
 
-## Command Reference for Agents
+## Commands
 
-All commands below support `--json` where noted, producing structured output suitable for parsing.
+### fd search \<query\> --json
 
-### Search (`--json`)
+Search restaurants by name or keyword. Returns up to 15 results.
 
 ```bash
 fd search 'chicken rice' --json
 ```
 
+Response:
 ```json
 {
   "results": [
@@ -47,56 +77,86 @@ fd search 'chicken rice' --json
 }
 ```
 
-### Menu (`--json`)
+### fd search-food \<dish\>
+
+Search for a specific dish across multiple restaurants. Shows matching menu items with prices. Use this when the user asks for a dish (e.g. "我想吃辣子鸡") rather than a restaurant.
+
+```bash
+fd search-food '辣子鸡'
+```
+
+Note: This command does not support `--json`. Parse the Rich text output.
+
+### fd menu \<code\> --json
+
+View a restaurant's full menu. The `code` comes from search results.
 
 ```bash
 fd menu g9xw --json
 ```
 
+Response:
 ```json
 {
-  "restaurant": {"code": "g9xw", "name": "...", "delivery_fee": 2.99, "min_order": 10.0},
+  "restaurant": {
+    "code": "g9xw",
+    "name": "Tian Tian Chicken Rice",
+    "delivery_fee": 2.99,
+    "min_order": 10.0
+  },
   "menu": [
-    {"index": 1, "name": "Chicken Rice", "price": 5.50, "category": "Mains", "product_id": 123, "variation_id": 456}
+    {"index": 1, "name": "Steamed Chicken Rice", "price": 5.50, "category": "Signature", "product_id": 123, "variation_id": 456}
   ]
 }
 ```
 
-### Add to Cart
+### fd add \<code\>:\<#\> [-n qty]
+
+Add a menu item to the cart. `<#>` is the `index` from menu output.
 
 ```bash
 fd add g9xw:1 -n 2    # item #1, qty 2
 fd add g9xw:3          # item #3, qty 1
 ```
 
-Items are identified by `<restaurant_code>:<menu_index>` where the index comes from `fd menu`.
+**Important:** Cart is single-restaurant. Adding from a different restaurant clears the existing cart. Warn the user before doing this.
 
-### Cart (`--json`)
+### fd cart --json
+
+View current cart contents.
 
 ```bash
 fd cart --json
 ```
 
+Response:
 ```json
 {
-  "restaurant": {"code": "g9xw", "name": "..."},
-  "items": [{"name": "Chicken Rice", "price": 5.50, "quantity": 2}],
+  "restaurant": {"code": "g9xw", "name": "Tian Tian Chicken Rice"},
+  "items": [{"name": "Steamed Chicken Rice", "price": 5.50, "quantity": 2}],
   "total": 11.00,
   "delivery_fee": 2.99
 }
 ```
 
-### Checkout (`--json`)
+### fd clear
 
-**Dry run** (preview price, no order placed):
+Clear the cart. Ask user for confirmation before running.
 
+### fd checkout [options] --json
+
+Place an order. **Always do `--dry-run` first and get user confirmation before the real checkout.**
+
+**Dry run (preview):**
 ```bash
 fd checkout --dry-run --json
 ```
 
+Response:
 ```json
 {
   "status": "dry_run",
+  "order_time": "now",
   "subtotal": 11.00,
   "delivery_fee": 2.99,
   "service_fee": 0.30,
@@ -105,11 +165,11 @@ fd checkout --dry-run --json
 ```
 
 **Place order:**
-
 ```bash
 fd checkout --json
 ```
 
+Response:
 ```json
 {
   "status": "ok",
@@ -118,45 +178,80 @@ fd checkout --json
 }
 ```
 
-**Scheduled delivery:**
-
-```bash
-fd checkout --time '13:00' --json          # today 13:00 (or tomorrow if past)
-fd checkout --time 'tomorrow 18:30' --json # tomorrow 18:30
-fd checkout --time '2026-03-15 12:00' --json
-```
-
-### Checkout Options
+#### Checkout Options
 
 | Option | Default | Description |
 |---|---|---|
 | `--pay` | `balance` | Payment method (pandapay wallet) |
-| `--voucher` | (none) | Voucher code |
-| `--note` | (none) | Delivery instructions |
-| `--time` | now | Scheduled delivery time |
-| `--dry-run` | false | Calculate only, don't order |
-| `--json` | false | JSON output |
+| `--voucher CODE` | — | Apply voucher/promo code |
+| `--note 'text'` | — | Delivery instructions |
+| `--time TIME` | now (immediate) | Scheduled delivery (see below) |
+| `--dry-run` | — | Preview price only, don't place order |
+| `--json` | — | JSON output |
+
+#### Scheduled Delivery Time Formats
+
+| Input | Meaning |
+|---|---|
+| `13:00` | Today 13:00 (tomorrow if already past) |
+| `tomorrow 18:30` | Tomorrow 18:30 |
+| `2026-03-15 12:00` | Specific date and time |
+
+```bash
+fd checkout --time '13:00' --json
+fd checkout --time 'tomorrow 18:30' --json
+```
+
+### fd orders
+
+View order history. No `--json` support — parse Rich text output.
+
+### fd reorder [#]
+
+Reorder from history.
+
+```bash
+fd reorder       # list recent orders with index numbers
+fd reorder 1     # load order #1 into cart
+```
+
+### fd token [value]
+
+Set or view login token.
+
+### fd refresh
+
+Auto-refresh token from Chrome cookies via Playwright.
+
+### fd address [postal_code]
+
+Set delivery address. No args = pick from saved account addresses interactively.
 
 ## Error Handling
 
-Errors are returned as:
-
+Errors in JSON mode return:
 ```json
-{"error": "Token 已过期，请重新设置"}
+{"error": "错误信息"}
 ```
 
-Common errors and recovery:
-- **Token expired** → `fd refresh` or ask user for new token
-- **No address** → `fd address <postal_code>`
-- **Item sold out** → shown in `--dry-run`, remove and pick alternative
-- **Cart empty** → `fd add` items first
-- **HTTP 403** → auto-retried (PerimeterX), usually resolves
+| Error | Recovery |
+|---|---|
+| Token 已过期 | Run `fd refresh`, or ask user for new token |
+| 需要设置地址 | `fd address <postal_code>` |
+| 菜品已售罄 | Show in `--dry-run`, suggest alternatives from menu |
+| 购物车为空 | Need `fd add` first |
+| HTTP 403 | Auto-retried internally; if persistent, try `fd refresh` |
+| 无法匹配菜品 | Menu may have changed; re-run `fd menu` and re-add |
 
-## Tips for Agents
+## Agent Guidelines
 
-1. **Always use `--json`** for parseable output
-2. **Always `--dry-run` before checkout** to confirm price with the user
-3. **Use `fd search-food`** when the user asks for a dish rather than a restaurant
-4. **Cart is single-restaurant** — adding items from a different restaurant clears the cart
-5. **Menu indices start at 1** and match the `index` field in JSON output
-6. **Hyphens and underscores are interchangeable** in command names (`search-food` = `search_food`)
+1. **Always `--json`** for machine-readable output
+2. **Always `--dry-run` before real checkout** — show the total and ask user to confirm
+3. **Never checkout without explicit user approval**
+4. **Use `fd search-food`** when user asks for a dish name, `fd search` when they name a restaurant
+5. **Present menus clearly** — group by category, show prices in SGD
+6. **Hyphens = underscores** in commands (`search-food` = `search_food`)
+7. **Menu indices start at 1**
+8. **If user speaks Chinese**, respond in Chinese; the CLI output is in Chinese
+9. **Show delivery fee + service fee** when presenting the total to avoid surprises
+10. **For reorders**, always show the loaded cart and confirm before checkout
