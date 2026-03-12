@@ -305,6 +305,22 @@ def _fetch_saved_addresses(api: FoodpandaAPI) -> list[dict]:
     return []
 
 
+def _print_token_expiry(tok: str):
+    """Print token expiry info."""
+    try:
+        import base64, time, datetime
+        payload = _json.loads(base64.urlsafe_b64decode(tok.split(".")[1] + "=="))
+        exp = datetime.datetime.fromtimestamp(payload["expires"])
+        remaining = payload["expires"] - time.time()
+        if remaining > 0:
+            h, m = int(remaining // 3600), int((remaining % 3600) // 60)
+            console.print(f"[green]过期时间: {exp.strftime('%Y-%m-%d %H:%M')}  (剩余 {h}h{m}m)[/]")
+        else:
+            console.print(f"[red]已过期: {exp.strftime('%Y-%m-%d %H:%M')}[/]")
+    except Exception:
+        pass
+
+
 @cli.command()
 @click.argument("token_value", required=False)
 def token(token_value):
@@ -318,18 +334,7 @@ def token(token_value):
         current = config.get("token", "")
         if current:
             console.print(f"[dim]当前 Token: {current[:20]}...{current[-10:]}[/]")
-            try:
-                import base64, time, datetime
-                payload = _json.loads(base64.urlsafe_b64decode(current.split(".")[1] + "=="))
-                exp = datetime.datetime.fromtimestamp(payload["expires"])
-                remaining = payload["expires"] - time.time()
-                if remaining > 0:
-                    h, m = int(remaining // 3600), int((remaining % 3600) // 60)
-                    console.print(f"[green]过期时间: {exp.strftime('%Y-%m-%d %H:%M')}  (剩余 {h}h{m}m)[/]")
-                else:
-                    console.print(f"[red]已过期: {exp.strftime('%Y-%m-%d %H:%M')}[/]")
-            except Exception:
-                pass
+            _print_token_expiry(current)
         else:
             console.print("[dim]未设置 Token[/]")
         console.print("[dim]设置: fd token <value>  |  续期: fd refresh[/]")
@@ -337,26 +342,27 @@ def token(token_value):
 
 @cli.command()
 def refresh():
-    """自动续期 Token — 从 Chrome 读取 cookies, 用 Playwright 刷新"""
-    console.print("[blue]正在从 Chrome 读取 cookies 并刷新 token...[/]")
+    """自动续期 Token — 优先 API 刷新 (无需浏览器), 回退 Playwright"""
+    console.print("[blue]正在刷新 token...[/]")
     new_token = refresh_token()
     if new_token:
         config = load_config()
         config["token"] = new_token
         save_config(config)
         console.print("[green]✓ Token 已刷新[/]")
-        try:
-            import base64, time, datetime
-            payload = _json.loads(base64.urlsafe_b64decode(new_token.split(".")[1] + "=="))
-            exp = datetime.datetime.fromtimestamp(payload["expires"])
-            remaining = payload["expires"] - time.time()
-            h, m = int(remaining // 3600), int((remaining % 3600) // 60)
-            console.print(f"[green]过期时间: {exp.strftime('%Y-%m-%d %H:%M')}  (剩余 {h}h{m}m)[/]")
-        except Exception:
-            pass
+        _print_token_expiry(new_token)
     else:
-        console.print("[red]✗ 刷新失败。确保 Chrome 已登录 foodpanda.sg 且 Playwright 已安装[/]")
-        console.print("[dim]安装: pip install playwright && playwright install chromium[/]")
+        error = getattr(refresh_token, "last_error", "")
+        if "rate_limited" in error:
+            console.print(f"[red]✗ API 被限流 {error.replace('rate_limited', '').strip()}[/]")
+            console.print("[dim]请稍后重试，或手动设置: fd token <value>[/]")
+        else:
+            if error:
+                console.print(f"[red]✗ 刷新失败: {error}[/]")
+            else:
+                console.print("[red]✗ 刷新失败[/]")
+            console.print("[dim]确保 Chrome 曾登录过 foodpanda.sg (需读取 cookie DB)[/]")
+            console.print("[dim]或手动设置: fd token <value>[/]")
 
 
 @cli.command()
