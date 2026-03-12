@@ -90,13 +90,14 @@ class FoodpandaAPI:
         limit: int = 20,
         sort: str = "",
         cuisine: str = "",
-        query: str = "",
     ) -> dict:
-        """List nearby restaurants using the Disco API."""
+        """List nearby restaurants using the vendors-gateway API."""
         params = {
             "latitude": latitude,
             "longitude": longitude,
             "language_id": 1,
+            "include": "characteristics",
+            "configuration": "Original",
             "country": "sg",
             "vertical": "restaurants",
             "opening_type": "delivery",
@@ -104,23 +105,21 @@ class FoodpandaAPI:
             "offset": offset,
             "customer_type": "regular",
             "dynamic_pricing": 0,
+            "use_free_delivery_label": "true",
+            "tag_label_metadata": "true",
             "budgets": "",
             "cuisine": cuisine,
             "sort": sort,
         }
-        if query:
-            params["q"] = query
         try:
             resp = self._request("GET",
-                f"{DISCO_BASE}/listing/api/v1/pandora/vendors",
+                f"{FD_API_BASE}/vendors-gateway/api/v1/pandora/vendors",
                 params=params,
                 headers=self._disco_headers(),
             )
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 400 and query:
-                raise APIError(f"搜索失败 (不支持中文搜索，请用英文)")
             raise APIError(f"获取餐厅列表失败 (HTTP {e.response.status_code})")
         except Exception as e:
             raise APIError(f"获取餐厅列表失败: {e}")
@@ -172,9 +171,23 @@ class FoodpandaAPI:
 
     def search_restaurants(
         self, query: str, latitude: float, longitude: float, limit: int = 15
-    ) -> dict:
-        """Search restaurants using listing API with q parameter."""
-        return self.list_restaurants(latitude, longitude, limit=limit, query=query)
+    ) -> list[dict]:
+        """Search restaurants by fetching nearby vendors and filtering by name.
+
+        The listing API does not support server-side text search, so we fetch
+        a large batch and do client-side name matching.
+        """
+        data = self.list_restaurants(latitude, longitude, limit=200)
+        items = data.get("data", {}).get("items", [])
+        q = query.lower()
+        # Exact substring matches first, then partial word matches
+        exact = [it for it in items if q in it.get("name", "").lower()]
+        if exact:
+            return exact[:limit]
+        # Try matching individual words
+        words = q.split()
+        partial = [it for it in items if any(w in it.get("name", "").lower() for w in words)]
+        return partial[:limit]
 
     def get_saved_addresses(self) -> list[dict]:
         """Get saved delivery addresses from account (requires authentication)."""

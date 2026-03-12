@@ -32,8 +32,7 @@ def _get_location() -> tuple[float, float]:
 
 def _search_vendors(api: FoodpandaAPI, query: str, lat: float, lng: float) -> list[dict]:
     """Search vendors by name, return list."""
-    data = api.search_restaurants(query, lat, lng)
-    return data.get("data", {}).get("items", [])
+    return api.search_restaurants(query, lat, lng)
 
 
 def _find_vendor(api: FoodpandaAPI, name: str, lat: float, lng: float) -> dict | None:

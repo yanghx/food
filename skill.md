@@ -41,21 +41,28 @@ fd address    # check delivery address
 ### Standard Order Flow
 
 ```
-1. fd search '<query>' --json        # find restaurant
-2. fd menu <code> --json             # browse menu, show to user
-3. fd add <code>:<#> [-n qty]        # add items (repeat as needed)
-4. fd cart --json                    # show cart to user for confirmation
-5. fd checkout --dry-run --json      # preview total, ask user to confirm
-6. fd checkout --json                # place order (only after user confirms)
+1. fd address --json                 # FIRST STEP: confirm delivery address with user
+2. fd search '<query>' --json        # find restaurant
+3. fd menu <code> --json             # browse menu, show to user
+4. fd add <code>:<#> [-n qty]        # add items (repeat as needed)
+5. fd cart --json                    # show cart to user for confirmation
+6. fd checkout --dry-run --json      # preview total, ASK USER TO CONFIRM before proceeding
+7. fd checkout --json                # place order (ONLY after user explicitly confirms)
 ```
+
+**⚠️ Two mandatory checkpoints:**
+- **Step 1**: Always confirm the delivery address first. If not set or incorrect, ask user for postal code and run `fd address <postal_code>`.
+- **Step 6→7**: Always show the dry-run result and **wait for explicit user confirmation** before running `fd checkout`.
 
 ### Reorder Flow
 
 ```
-1. fd reorder                        # list recent orders
-2. fd reorder <#>                    # load into cart
-3. fd cart --json                    # confirm with user
-4. fd checkout --json                # place order
+1. fd address --json                 # FIRST STEP: confirm delivery address with user
+2. fd reorder                        # list recent orders
+3. fd reorder <#>                    # load into cart
+4. fd cart --json                    # confirm with user
+5. fd checkout --dry-run --json      # preview total, ASK USER TO CONFIRM before proceeding
+6. fd checkout --json                # place order (ONLY after user explicitly confirms)
 ```
 
 ## Commands
@@ -245,13 +252,14 @@ Errors in JSON mode return:
 
 ## Agent Guidelines
 
-1. **Always `--json`** for machine-readable output
-2. **Always `--dry-run` before real checkout** — show the total and ask user to confirm
-3. **Never checkout without explicit user approval**
-4. **Use `fd search-food`** when user asks for a dish name, `fd search` when they name a restaurant
-5. **Present menus clearly** — group by category, show prices in SGD
-6. **Hyphens = underscores** in commands (`search-food` = `search_food`)
-7. **Menu indices start at 1**
-8. **If user speaks Chinese**, respond in Chinese; the CLI output is in Chinese
-9. **Show delivery fee + service fee** when presenting the total to avoid surprises
-10. **For reorders**, always show the loaded cart and confirm before checkout
+1. **First step is ALWAYS `fd address`** — confirm the delivery address with the user before doing anything else. If not set, ask for postal code.
+2. **Always `--json`** for machine-readable output
+3. **Always `--dry-run` before real checkout** — show the total and ask user to confirm
+4. **Never `fd checkout` without explicit user approval** — you MUST wait for the user to say yes/confirm before running `fd checkout --json`
+5. **Use `fd search-food`** when user asks for a dish name, `fd search` when they name a restaurant
+6. **Present menus clearly** — group by category, show prices in SGD
+7. **Hyphens = underscores** in commands (`search-food` = `search_food`)
+8. **Menu indices start at 1**
+9. **If user speaks Chinese**, respond in Chinese; the CLI output is in Chinese
+10. **Show delivery fee + service fee** when presenting the total to avoid surprises
+11. **For reorders**, always show the loaded cart and confirm before checkout
