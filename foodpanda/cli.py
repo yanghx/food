@@ -679,11 +679,21 @@ def checkout(pay, voucher, note, deliver_time, as_json, dry_run):
         if not as_json:
             console.print(f"[blue]  [4/4] 提交订单 (支付: {pay})...[/]")
 
-        # Get customer info for checkout
-        customer = api.get_customer_info()
-        customer_data = customer.get("data", customer)
-        customer_id = str(customer_data.get("id", ""))
-        customer_email = customer_data.get("email", "")
+        # Get customer info for checkout (cache in config to survive 403)
+        customer_id = config.get("customer_id", "")
+        customer_email = config.get("customer_email", "")
+        try:
+            customer = api.get_customer_info()
+            customer_data = customer.get("data", customer)
+            customer_id = str(customer_data.get("id", ""))
+            customer_email = customer_data.get("email", "")
+            config["customer_id"] = customer_id
+            config["customer_email"] = customer_email
+            save_config(config)
+        except APIError:
+            if not customer_id:
+                _checkout_error("获取客户信息失败且无缓存，请重试", as_json)
+                return
 
         if not address:
             _checkout_error("未找到配送地址，请先 fd address 设置", as_json)

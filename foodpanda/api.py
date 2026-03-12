@@ -1,3 +1,4 @@
+import time
 import uuid
 
 import httpx
@@ -5,6 +6,7 @@ import httpx
 DISCO_BASE = "https://disco.deliveryhero.io"
 FD_API_BASE = "https://sg.fd-api.com"
 ONEMAP_BASE = "https://www.onemap.gov.sg/api/common/elastic/search"
+MAX_RETRIES = 3
 
 COMMON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -21,6 +23,17 @@ class FoodpandaAPI:
         self.client = httpx.Client(timeout=30, follow_redirects=True)
         self.perseus_client_id = str(uuid.uuid4())
         self.perseus_session_id = str(uuid.uuid4())
+
+    def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """Make HTTP request with automatic retry on 403 (PerimeterX)."""
+        for attempt in range(MAX_RETRIES):
+            resp = self.client.request(method, url, **kwargs)
+            if resp.status_code != 403 or attempt == MAX_RETRIES - 1:
+                return resp
+            time.sleep(2 * (attempt + 1))
+            # Rotate session IDs on retry
+            self.perseus_session_id = str(uuid.uuid4())
+        return resp
 
     def _disco_headers(self) -> dict:
         return {
@@ -98,7 +111,7 @@ class FoodpandaAPI:
         if query:
             params["q"] = query
         try:
-            resp = self.client.get(
+            resp = self._request("GET",
                 f"{DISCO_BASE}/listing/api/v1/pandora/vendors",
                 params=params,
                 headers=self._disco_headers(),
@@ -126,7 +139,7 @@ class FoodpandaAPI:
             # Don't send bearer token — expired token causes 401 on this public endpoint
             headers = self._fd_headers()
             headers.pop("Authorization", None)
-            resp = self.client.get(
+            resp = self._request("GET",
                 f"{FD_API_BASE}/api/v5/vendors/{vendor_code}",
                 params=params,
                 headers=headers,
@@ -143,7 +156,7 @@ class FoodpandaAPI:
         if not self.token:
             raise APIError("需要登录 token 才能查看订单历史")
         try:
-            resp = self.client.get(
+            resp = self._request("GET",
                 f"{FD_API_BASE}/api/v5/orders/order_history",
                 params={"include": "order_products,order_details", "limit": 20},
                 headers=self._fd_headers(),
@@ -168,7 +181,7 @@ class FoodpandaAPI:
         if not self.token:
             raise APIError("需要登录 Token 才能获取保存的地址")
         try:
-            resp = self.client.get(
+            resp = self._request("GET",
                 f"{FD_API_BASE}/api/v5/customers/addresses",
                 headers=self._fd_headers(),
             )
@@ -252,7 +265,7 @@ class FoodpandaAPI:
             },
         }
         try:
-            resp = self.client.post(
+            resp = self._request("POST",
                 f"{FD_API_BASE}/api/v5/cart/calculate",
                 params={"include": "expedition"},
                 json=body,
@@ -292,7 +305,7 @@ class FoodpandaAPI:
             ],
         }
         try:
-            resp = self.client.post(
+            resp = self._request("POST",
                 f"{FD_API_BASE}/api/v5/purchase/intent",
                 params={"include": "cashback", "locale": "en_SG"},
                 json=body,
@@ -341,7 +354,7 @@ class FoodpandaAPI:
         if payment_method == "balance":
             body["wallet"] = {"topUp": {"fastTopUp": True}}
         try:
-            resp = self.client.put(
+            resp = self._request("PUT",
                 f"{FD_API_BASE}/api/v5/purchase/intent/{intent_id}",
                 params={"include": "cashback", "locale": "en_SG", "fast-top-up": "true"},
                 json=body,
@@ -389,7 +402,20 @@ class FoodpandaAPI:
                 "age_verification_token": "",
             },
             "expedition": {
-                "delivery_address": address,
+                "delivery_address": {
+                    "id": str(address.get("id", "")),
+                    "address_line1": address.get("address_line1", ""),
+                    "address_line2": str(address.get("address_line2", "")),
+                    "latitude": address.get("latitude", latitude),
+                    "longitude": address.get("longitude", longitude),
+                    "postcode": str(address.get("postcode", "")),
+                    "city_id": address.get("city_id", 1),
+                    "building": address.get("building", ""),
+                    "floor": address.get("floor", ""),
+                    "delivery_instructions": delivery_instructions or address.get("delivery_instructions", ""),
+                    "label": address.get("label") or "",
+                    "company": address.get("company") or "",
+                },
                 "type": "delivery",
                 "latitude": latitude,
                 "longitude": longitude,
@@ -425,7 +451,7 @@ class FoodpandaAPI:
             "joker": {"single_discount": True},
         }
         try:
-            resp = self.client.post(
+            resp = self._request("POST",
                 f"{FD_API_BASE}/api/v5/cart/checkout",
                 json=body,
                 headers=self._fd_headers(),
@@ -444,7 +470,7 @@ class FoodpandaAPI:
         if not self.token:
             raise APIError("需要登录 Token")
         try:
-            resp = self.client.get(
+            resp = self._request("GET",
                 f"{FD_API_BASE}/api/v5/customers",
                 headers=self._fd_headers(),
             )
@@ -460,7 +486,7 @@ class FoodpandaAPI:
     def get_payment_status(self, purchase_id: str, order_code: str) -> dict:
         """Poll payment status after checkout."""
         try:
-            resp = self.client.get(
+            resp = self._request("GET",
                 f"{FD_API_BASE}/api/v5/payment/status",
                 params={"purchaseId": purchase_id, "platformReferenceId": order_code},
                 headers=self._fd_headers(),
