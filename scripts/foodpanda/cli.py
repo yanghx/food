@@ -342,27 +342,20 @@ def token(token_value):
 
 @cli.command()
 def refresh():
-    """自动续期 Token — 优先 API 刷新 (无需浏览器), 回退 Playwright"""
+    """自动续期 Token — 从 Chrome cookie 读取或触发 Chrome 刷新"""
     console.print("[blue]正在刷新 token...[/]")
     new_token = refresh_token()
     if new_token:
-        config = load_config()
-        config["token"] = new_token
-        save_config(config)
         console.print("[green]✓ Token 已刷新[/]")
         _print_token_expiry(new_token)
     else:
         error = getattr(refresh_token, "last_error", "")
-        if "rate_limited" in error:
-            console.print(f"[red]✗ API 被限流 {error.replace('rate_limited', '').strip()}[/]")
-            console.print("[dim]请稍后重试，或手动设置: fd token <value>[/]")
+        if error:
+            console.print(f"[red]✗ {error}[/]")
         else:
-            if error:
-                console.print(f"[red]✗ 刷新失败: {error}[/]")
-            else:
-                console.print("[red]✗ 刷新失败[/]")
-            console.print("[dim]确保 Chrome 曾登录过 foodpanda.sg (需读取 cookie DB)[/]")
-            console.print("[dim]或手动设置: fd token <value>[/]")
+            console.print("[red]✗ 刷新失败[/]")
+        console.print("[dim]确保 Chrome 已登录 foodpanda.sg[/]")
+        console.print("[dim]或手动设置: fd token <value>[/]")
 
 
 @cli.command()
